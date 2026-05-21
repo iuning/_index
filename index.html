@@ -580,10 +580,10 @@
         },
       };
 
-      // 天气模块 - 使用 uapis.cn 接口（国内稳定，无需注册）
+      // 天气模块 - 使用 Open-Meteo 和 uapis.cn（自动选择最快的）
       const WeatherModule = {
         init() {
-          this.city = Store.get("ntpCity", "北京");
+          this.city = Store.get("ntpCity", "feixi");
           this.contentEl = $("#weatherContent");
           this.editOverlay = $("#weatherEditOverlay");
           this.input = $("#weatherCityInput");
@@ -591,19 +591,49 @@
           this.fetchWeather(this.city);
         },
 
-        // 根据天气描述映射emoji
-        getWeatherEmoji(weatherText) {
+        // WMO天气代码映射到emoji和中文描述
+        getWeatherInfo(code) {
+          const weatherMap = {
+            0: { emoji: "☀️", desc: "晴" },
+            1: { emoji: "🌤️", desc: "晴间多云" },
+            2: { emoji: "⛅", desc: "多云" },
+            3: { emoji: "☁️", desc: "阴" },
+            45: { emoji: "🌫️", desc: "雾" },
+            48: { emoji: "🌫️", desc: "雾凇" },
+            51: { emoji: "🌦️", desc: "小雨" },
+            53: { emoji: "🌦️", desc: "小雨" },
+            55: { emoji: "🌦️", desc: "小雨" },
+            61: { emoji: "🌧️", desc: "中雨" },
+            63: { emoji: "🌧️", desc: "中雨" },
+            65: { emoji: "🌧️", desc: "大雨" },
+            66: { emoji: "🌨️", desc: "雨夹雪" },
+            67: { emoji: "🌨️", desc: "雨夹雪" },
+            71: { emoji: "❄️", desc: "小雪" },
+            73: { emoji: "❄️", desc: "中雪" },
+            75: { emoji: "❄️", desc: "大雪" },
+            80: { emoji: "🌦️", desc: "阵雨" },
+            81: { emoji: "🌧️", desc: "阵雨" },
+            82: { emoji: "⛈️", desc: "暴雨" },
+            95: { emoji: "⛈️", desc: "雷阵雨" },
+            96: { emoji: "⛈️", desc: "雷阵雨" },
+            99: { emoji: "⛈️", desc: "雷阵雨" },
+          };
+          return weatherMap[code] || { emoji: "🌤️", desc: "未知" };
+        },
+
+        // 将中文天气描述转换为WMO代码（近似映射）
+        weatherCodeToWmo(weatherText) {
           const text = weatherText || "";
-          if (text.includes("晴")) return "☀️";
-          if (text.includes("多云") || text.includes("少云")) return "⛅";
-          if (text.includes("阴")) return "☁️";
-          if (text.includes("小雨") || text.includes("阵雨")) return "🌦️";
-          if (text.includes("中雨")) return "🌧️";
-          if (text.includes("大雨") || text.includes("暴雨")) return "⛈️";
-          if (text.includes("雪")) return "❄️";
-          if (text.includes("雷")) return "⛈️";
-          if (text.includes("雾") || text.includes("霾")) return "🌫️";
-          return "🌤️";
+          if (text.includes("晴")) return 0;
+          if (text.includes("多云") || text.includes("少云")) return 2;
+          if (text.includes("阴")) return 3;
+          if (text.includes("雾") || text.includes("霾")) return 45;
+          if (text.includes("小雨") || text.includes("阵雨")) return 51;
+          if (text.includes("中雨")) return 61;
+          if (text.includes("大雨") || text.includes("暴雨")) return 82;
+          if (text.includes("雪")) return 71;
+          if (text.includes("雷") || text.includes("雷阵雨")) return 95;
+          return 0; // 默认晴
         },
 
         bindEvents() {
@@ -632,113 +662,247 @@
         },
 
         async fetchWeather(cityName) {
-          if (!cityName) cityName = "北京";
+          if (!cityName) cityName = "feixi";
           this.contentEl.style.opacity = "0.3";
-          try {
-            // 调用新API：获取实时天气 + 扩展字段 + 7天预报
-            const url = `https://uapis.cn/api/v1/misc/weather?city=${encodeURIComponent(cityName)}&extended=true&forecast=true`;
-            const resp = await fetch(`https://cors.eu.org/${url}`);
-            const data = await resp.json();
 
-            // 检查响应状态（接口成功时直接返回天气数据，无code字段表示成功）
-            if (!data || !data.city) {
-              throw new Error(
-                data.message || "未找到该城市，试试输入“北京”、“上海”等中文名",
-              );
-            }
+          const apis = {
+            openMeteo: () => this.fetchOpenMeteo(cityName),
+            uapis: () =>
+              fetch(
+                `https://uapis.cn/api/v1/misc/weather?city=${encodeURIComponent(cityName)}&extended=true&forecast=true`,
+              ),
+            uapisCors: () =>
+              fetch(
+                `https://cors.eu.org/https://uapis.cn/api/v1/misc/weather?city=${encodeURIComponent(cityName)}&extended=true&forecast=true`,
+              ),
+          };
 
-            const cityDisplay = data.city;
-            const currentTemp = data.temperature;
-            const weatherDesc = data.weather;
-            const humidity = data.humidity || "--";
-            const windScale = data.wind_scale || "微风";
-            const feelsLike = data.feels_like;
-            const uvIndex = data.uv_index;
-            const visibility = data.visibility;
-            const emoji = this.getWeatherEmoji(weatherDesc);
-
-            // 扩展信息显示（体感温度 + 紫外线）
-            const extraInfo =
-              `${feelsLike ? `体感${feelsLike}°` : ""}${uvIndex ? ` · UV${uvIndex}` : ""}${visibility ? ` · 能见度${visibility}km` : ""}`.replace(
-                /^ · /,
-                "",
-              );
-
-            // 处理未来5天预报（forecast数组）
-            let forecasts = [];
-            if (data.forecast && Array.isArray(data.forecast)) {
-              const futureDays = data.forecast.slice(1, 6); // 取明天开始的后5天
-              for (let day of futureDays) {
-                if (!day) continue;
-                const date = new Date(day.date);
-                const dayName = [
-                  "周日",
-                  "周一",
-                  "周二",
-                  "周三",
-                  "周四",
-                  "周五",
-                  "周六",
-                ][date.getDay()];
-                const high = day.temp_max;
-                const low = day.temp_min;
-                const dayWeather = day.weather_day || day.weather || "";
-                const fEmoji = this.getWeatherEmoji(dayWeather);
-                forecasts.push({
-                  day: dayName,
-                  emoji: fEmoji,
-                  high: high,
-                  low: low,
-                });
-              }
-            }
-
-            // 补齐到5天
-            while (forecasts.length < 5) {
-              forecasts.push({ day: "--", emoji: "☁️", high: "--", low: "--" });
-            }
-
-            this.render(
-              cityDisplay,
-              currentTemp,
-              weatherDesc,
-              emoji,
-              humidity,
-              windScale,
-              extraInfo,
-              forecasts,
+          const firstSuccess = async (tasks) => {
+            const wrapped = tasks.map((task) =>
+              task().then((result) => {
+                if (result) return result;
+                return Promise.reject(new Error("empty result"));
+              }),
             );
-          } catch (err) {
-            this.contentEl.innerHTML = `<div class="w-full flex flex-col items-center justify-center text-[15px] font-bold gap-3 pb-2"><i class="fa-solid fa-cloud-bolt text-[42px] mb-2 opacity-50"></i><span class="opacity-80">⚠️ ${err.message || "天气获取失败，试试其他城市名"}</span></div>`;
-          } finally {
-            this.contentEl.style.opacity = "1";
+            try {
+              return await Promise.any(wrapped);
+            } catch (e) {
+              console.warn("所有接口均失败", e);
+              return null;
+            }
+          };
+
+          let data = null;
+
+          try {
+            // 优先尝试 Open-Meteo（最稳定）
+            data = await apis.openMeteo();
+            console.log("Open-Meteo 接口返回成功");
+          } catch (e) {
+            console.log("Open-Meteo 失败，尝试 uapis.cn", e);
           }
+
+          if (!data) {
+            // 备用方案：尝试 uapis.cn 的两种方式
+            data = await firstSuccess([
+              async () => {
+                // 直接请求 uapis.cn
+                const resp = await apis.uapis();
+                if (!resp.ok) throw new Error("uapis.cn 直接请求失败");
+                const json = await resp.json();
+                if (json && json.city) {
+                  console.log("uapis.cn 直接请求成功");
+                  return this.parseUapis(json);
+                }
+                throw new Error("uapis.cn 返回数据异常");
+              },
+              async () => {
+                // 使用 cors-anywhere 代理
+                const resp = await apis.uapisCors();
+                if (!resp.ok) throw new Error("cors 代理请求失败");
+                const json = await resp.json();
+                if (json && json.city) {
+                  console.log("cors 代理请求成功");
+                  return this.parseUapis(json);
+                }
+                throw new Error("代理返回数据异常");
+              },
+            ]);
+          }
+
+          if (data) {
+            this.render(data);
+          } else {
+            this.contentEl.innerHTML = `<div class="w-full flex flex-col items-center justify-center text-[15px] font-bold gap-3 pb-2"><i class="fa-solid fa-cloud-bolt text-[42px] mb-2 opacity-50"></i><span class="opacity-80">⚠️ 所有天气接口均失败，请稍后重试</span></div>`;
+          }
+
+          this.contentEl.style.opacity = "1";
         },
 
-        render(
-          city,
-          temp,
-          desc,
-          emoji,
-          humidity,
-          windScale,
-          extraInfo,
-          forecasts,
-        ) {
+        // 获取 Open-Meteo 数据
+        async fetchOpenMeteo(cityName) {
+          // 第一步：获取城市经纬度
+          const geoResp = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}`,
+          );
+          const geoData = await geoResp.json();
+
+          if (!geoData.results || geoData.results.length === 0) {
+            throw new Error("未找到该城市");
+          }
+
+          const { latitude, longitude, name, country } = geoData.results[0];
+
+          // 第二步：获取天气数据
+          const weatherResp = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,apparent_temperature,uv_index,visibility&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto`,
+          );
+          const weatherData = await weatherResp.json();
+
+          if (!weatherData.current || !weatherData.daily) {
+            throw new Error("天气数据格式异常");
+          }
+
+          return this.parseOpenMeteo(weatherData, name);
+        },
+
+        parseOpenMeteo(json, cityName) {
+          const current = json.current || {};
+          const daily = json.daily || {};
+          const weatherInfo = this.getWeatherInfo(current.weather_code);
+
+          return {
+            city: cityName,
+            temp: current.temperature_2m,
+            desc: weatherInfo.desc,
+            emoji: weatherInfo.emoji,
+            humidity: current.relative_humidity_2m || "--",
+            windScale: this.getWindLevel(current.wind_speed_10m),
+            extraInfo:
+              `${current.apparent_temperature ? `体感${current.apparent_temperature}°` : ""}${current.uv_index ? ` · UV${current.uv_index}` : ""}${current.visibility ? ` · 能见度${(current.visibility / 1000).toFixed(1)}km` : ""}`.replace(
+                /^ · /,
+                "",
+              ),
+            forecasts: this.parseOpenMeteoForecast(daily),
+          };
+        },
+
+        getWindLevel(speedKmh) {
+          if (speedKmh == null) return "--";
+          if (speedKmh < 1) return "无风";
+          if (speedKmh < 6) return "微风";
+          if (speedKmh < 12) return "和风";
+          if (speedKmh < 20) return "清风";
+          if (speedKmh < 29) return "强风";
+          if (speedKmh < 39) return "疾风";
+          return "大风";
+        },
+
+        parseOpenMeteoForecast(daily) {
+          if (!daily.time || !Array.isArray(daily.time))
+            return this.emptyForecasts();
+          const forecasts = [];
+          const dayNames = [
+            "周日",
+            "周一",
+            "周二",
+            "周三",
+            "周四",
+            "周五",
+            "周六",
+          ];
+
+          // 跳过今天，取未来5天
+          for (let i = 1; i <= 5; i++) {
+            if (i < daily.time.length) {
+              const date = new Date(daily.time[i]);
+              const weatherInfo = this.getWeatherInfo(daily.weather_code[i]);
+              forecasts.push({
+                day: dayNames[date.getDay()],
+                emoji: weatherInfo.emoji,
+                high: Math.round(daily.temperature_2m_max[i]),
+                low: Math.round(daily.temperature_2m_min[i]),
+              });
+            } else {
+              forecasts.push({ day: "--", emoji: "☁️", high: "--", low: "--" });
+            }
+          }
+
+          while (forecasts.length < 5) {
+            forecasts.push({ day: "--", emoji: "☁️", high: "--", low: "--" });
+          }
+          return forecasts;
+        },
+
+        // 解析 uapis.cn 数据
+        parseUapis(json) {
+          const d = json;
+          return {
+            city: d.city,
+            temp: d.temperature,
+            desc: d.weather,
+            emoji: this.getWeatherInfo(this.weatherCodeToWmo(d.weather)),
+            humidity: d.humidity || "--",
+            windScale: d.wind_scale || "微风",
+            extraInfo:
+              `${d.feels_like ? `体感${d.feels_like}°` : ""}${d.uv_index ? ` · UV${d.uv_index}` : ""}${d.visibility ? ` · 能见度${d.visibility}km` : ""}`.replace(
+                /^ · /,
+                "",
+              ),
+            forecasts: this.parseUapisForecast(d.forecast),
+          };
+        },
+
+        parseUapisForecast(forecast) {
+          if (!forecast || !Array.isArray(forecast))
+            return this.emptyForecasts();
+          const futureDays = forecast.slice(1, 6);
+          const forecasts = futureDays
+            .map((day) => {
+              if (!day) return null;
+              const date = new Date(day.date);
+              return {
+                day: ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][
+                  date.getDay()
+                ],
+                emoji: this.getWeatherEmoji(
+                  day.weather_day || day.weather || "",
+                ),
+                high: day.temp_max,
+                low: day.temp_min,
+              };
+            })
+            .filter(Boolean);
+          while (forecasts.length < 5) {
+            forecasts.push({ day: "--", emoji: "☁️", high: "--", low: "--" });
+          }
+          return forecasts;
+        },
+
+        emptyForecasts() {
+          return Array(5).fill({
+            day: "--",
+            emoji: "☁️",
+            high: "--",
+            low: "--",
+          });
+        },
+
+        render(data) {
           this.contentEl.innerHTML = `
             <div class="flex items-center justify-center md:justify-start gap-6 md:gap-8 w-full md:w-[45%] lg:w-[40%] px-4 pt-2 md:pt-0 pb-4 md:pb-0">
-                <div class="text-[72px] leading-none drop-shadow select-none">${emoji}</div>
+                <div class="text-[72px] leading-none drop-shadow select-none">${data.emoji}</div>
                 <div class="flex flex-col">
-                <div class="text-[52px] font-bold tracking-tighter leading-none mb-1.5 ml-[-2px]">${Math.round(temp)}°</div>
-                <div class="text-[19px] font-extrabold tracking-wide drop-shadow-sm">${city}</div>
-                <div class="text-[14px] font-semibold opacity-70 mt-1">${desc} · 💧 ${humidity}% · 🍃 ${windScale}</div>
-                ${extraInfo ? `<div class="text-[12px] font-medium opacity-60 mt-0.5">${extraInfo}</div>` : ""}
+                <div class="text-[52px] font-bold tracking-tighter leading-none mb-1.5 ml-[-2px]">${Math.round(data.temp)}°</div>
+                <div class="text-[19px] font-extrabold tracking-wide drop-shadow-sm">${data.city}</div>
+                <div class="text-[14px] font-semibold opacity-70 mt-1">${data.desc} · 💧 ${data.humidity}% · 🍃 ${data.windScale}</div>
+                ${data.extraInfo ? `<div class="text-[12px] font-medium opacity-60 mt-0.5">${data.extraInfo}</div>` : ""}
                 </div>
             </div>
             <div class="hidden md:block w-px h-[70px] bg-black/10 dark:bg-white/10 shrink-0"></div>
             <div class="block md:hidden h-px w-[60%] bg-black/10 dark:bg-white/10 my-4 shrink-0"></div>
             <div class="flex-1 w-full flex justify-between items-center px-4 overflow-x-auto scroolbar-hide shrink-0 pb-2 md:pb-0 mt-2 md:mt-0">
-                ${forecasts
+                ${data.forecasts
                   .map(
                     (f) => `
                 <div class="flex flex-col items-center min-w-[56px] shrink-0">
