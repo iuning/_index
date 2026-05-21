@@ -621,7 +621,6 @@
           return weatherMap[code] || { emoji: "🌤️", desc: "未知" };
         },
 
-        
         bindEvents() {
           $("#weatherEditBtn").addEventListener("click", () => {
             this.input.value = this.city;
@@ -771,7 +770,6 @@
           return forecasts;
         },
 
-        
         emptyForecasts() {
           return Array(5).fill({
             day: "--",
@@ -839,6 +837,20 @@
             color: "#24292e",
           },
           {
+            id: 1775835861578,
+            name: "微信读书",
+            url: "https://weread.qq.com/",
+            icon: "https://rescdn.qqmail.com/node/wr/wrpage/style/images/independent/favicon/favicon_48h.png",
+            color: "#52bdff",
+          },
+          {
+            id: 1775835806754,
+            name: "京东读书",
+            url: "https://ebooks.jd.com/",
+            icon: "https://storage.360buyimg.com/page/jdread-web/reader/toc/dfc2278/ico.png",
+            color: "#e64500",
+          },
+          {
             id: 4,
             name: "YouTube",
             url: "https://youtube.com",
@@ -874,13 +886,6 @@
             color: "#000000",
           },
           {
-            id: 9,
-            name: "Netflix",
-            url: "https://netflix.com",
-            icon: "fa-solid fa-n",
-            color: "#e50914",
-          },
-          {
             id: 10,
             name: "LeetCode",
             url: "https://leetcode.cn",
@@ -892,7 +897,7 @@
             name: "Bing",
             url: "https://cn.bing.com/",
             icon: "https://edgecdn-embza6g8cacagcbn.z01.azurefd.net/welcome/static/favicon.png",
-            color: "#aaee00",
+            color: "#ffffff",
           },
         ],
 
