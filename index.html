@@ -637,7 +637,7 @@
           try {
             // 调用新API：获取实时天气 + 扩展字段 + 7天预报
             const url = `https://uapis.cn/api/v1/misc/weather?city=${encodeURIComponent(cityName)}&extended=true&forecast=true`;
-            const resp = await fetch(url);
+            const resp = await fetch(`https://cors.eu.org/${url}`);
             const data = await resp.json();
 
             // 检查响应状态（接口成功时直接返回天气数据，无code字段表示成功）
