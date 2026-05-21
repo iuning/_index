@@ -621,21 +621,7 @@
           return weatherMap[code] || { emoji: "🌤️", desc: "未知" };
         },
 
-        // 将中文天气描述转换为WMO代码（近似映射）
-        weatherCodeToWmo(weatherText) {
-          const text = weatherText || "";
-          if (text.includes("晴")) return 0;
-          if (text.includes("多云") || text.includes("少云")) return 2;
-          if (text.includes("阴")) return 3;
-          if (text.includes("雾") || text.includes("霾")) return 45;
-          if (text.includes("小雨") || text.includes("阵雨")) return 51;
-          if (text.includes("中雨")) return 61;
-          if (text.includes("大雨") || text.includes("暴雨")) return 82;
-          if (text.includes("雪")) return 71;
-          if (text.includes("雷") || text.includes("雷阵雨")) return 95;
-          return 0; // 默认晴
-        },
-
+        
         bindEvents() {
           $("#weatherEditBtn").addEventListener("click", () => {
             this.input.value = this.city;
@@ -665,75 +651,26 @@
           if (!cityName) cityName = "feixi";
           this.contentEl.style.opacity = "0.3";
 
-          const apis = {
-            openMeteo: () => this.fetchOpenMeteo(cityName),
-            uapis: () =>
-              fetch(
-                `https://uapis.cn/api/v1/misc/weather?city=${encodeURIComponent(cityName)}&extended=true&forecast=true`,
-              ),
-            uapisCors: () =>
-              fetch(
-                `https://cors.eu.org/https://uapis.cn/api/v1/misc/weather?city=${encodeURIComponent(cityName)}&extended=true&forecast=true`,
-              ),
-          };
-
-          const firstSuccess = async (tasks) => {
-            const wrapped = tasks.map((task) =>
-              task().then((result) => {
-                if (result) return result;
-                return Promise.reject(new Error("empty result"));
-              }),
-            );
-            try {
-              return await Promise.any(wrapped);
-            } catch (e) {
-              console.warn("所有接口均失败", e);
-              return null;
-            }
-          };
-
           let data = null;
 
           try {
-            // 优先尝试 Open-Meteo（最稳定）
-            data = await apis.openMeteo();
+            data = await this.fetchOpenMeteo(cityName);
             console.log("Open-Meteo 接口返回成功");
           } catch (e) {
-            console.log("Open-Meteo 失败，尝试 uapis.cn", e);
-          }
-
-          if (!data) {
-            // 备用方案：尝试 uapis.cn 的两种方式
-            data = await firstSuccess([
-              async () => {
-                // 直接请求 uapis.cn
-                const resp = await apis.uapis();
-                if (!resp.ok) throw new Error("uapis.cn 直接请求失败");
-                const json = await resp.json();
-                if (json && json.city) {
-                  console.log("uapis.cn 直接请求成功");
-                  return this.parseUapis(json);
-                }
-                throw new Error("uapis.cn 返回数据异常");
-              },
-              async () => {
-                // 使用 cors-anywhere 代理
-                const resp = await apis.uapisCors();
-                if (!resp.ok) throw new Error("cors 代理请求失败");
-                const json = await resp.json();
-                if (json && json.city) {
-                  console.log("cors 代理请求成功");
-                  return this.parseUapis(json);
-                }
-                throw new Error("代理返回数据异常");
-              },
-            ]);
+            console.warn("Open-Meteo 接口失败:", e);
+            this.contentEl.innerHTML = `
+                <div class="w-full flex flex-col items-center justify-center text-[15px] font-bold gap-3 pb-2">
+                  <i class="fa-solid fa-cloud-bolt text-[42px] mb-2 opacity-50"></i>
+                  <span class="opacity-80">⚠️ 天气接口失败，请稍后重试</span>
+                  <span class="text-xs opacity-60">${e.message}</span>
+                </div>
+              `;
+            this.contentEl.style.opacity = "1";
+            return;
           }
 
           if (data) {
             this.render(data);
-          } else {
-            this.contentEl.innerHTML = `<div class="w-full flex flex-col items-center justify-center text-[15px] font-bold gap-3 pb-2"><i class="fa-solid fa-cloud-bolt text-[42px] mb-2 opacity-50"></i><span class="opacity-80">⚠️ 所有天气接口均失败，请稍后重试</span></div>`;
           }
 
           this.contentEl.style.opacity = "1";
@@ -834,51 +771,7 @@
           return forecasts;
         },
 
-        // 解析 uapis.cn 数据
-        parseUapis(json) {
-          const d = json;
-          return {
-            city: d.city,
-            temp: d.temperature,
-            desc: d.weather,
-            emoji: this.getWeatherInfo(this.weatherCodeToWmo(d.weather)),
-            humidity: d.humidity || "--",
-            windScale: d.wind_scale || "微风",
-            extraInfo:
-              `${d.feels_like ? `体感${d.feels_like}°` : ""}${d.uv_index ? ` · UV${d.uv_index}` : ""}${d.visibility ? ` · 能见度${d.visibility}km` : ""}`.replace(
-                /^ · /,
-                "",
-              ),
-            forecasts: this.parseUapisForecast(d.forecast),
-          };
-        },
-
-        parseUapisForecast(forecast) {
-          if (!forecast || !Array.isArray(forecast))
-            return this.emptyForecasts();
-          const futureDays = forecast.slice(1, 6);
-          const forecasts = futureDays
-            .map((day) => {
-              if (!day) return null;
-              const date = new Date(day.date);
-              return {
-                day: ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][
-                  date.getDay()
-                ],
-                emoji: this.getWeatherEmoji(
-                  day.weather_day || day.weather || "",
-                ),
-                high: day.temp_max,
-                low: day.temp_min,
-              };
-            })
-            .filter(Boolean);
-          while (forecasts.length < 5) {
-            forecasts.push({ day: "--", emoji: "☁️", high: "--", low: "--" });
-          }
-          return forecasts;
-        },
-
+        
         emptyForecasts() {
           return Array(5).fill({
             day: "--",
@@ -890,31 +783,31 @@
 
         render(data) {
           this.contentEl.innerHTML = `
-            <div class="flex items-center justify-center md:justify-start gap-6 md:gap-8 w-full md:w-[45%] lg:w-[40%] px-4 pt-2 md:pt-0 pb-4 md:pb-0">
-                <div class="text-[72px] leading-none drop-shadow select-none">${data.emoji}</div>
-                <div class="flex flex-col">
-                <div class="text-[52px] font-bold tracking-tighter leading-none mb-1.5 ml-[-2px]">${Math.round(data.temp)}°</div>
-                <div class="text-[19px] font-extrabold tracking-wide drop-shadow-sm">${data.city}</div>
-                <div class="text-[14px] font-semibold opacity-70 mt-1">${data.desc} · 💧 ${data.humidity}% · 🍃 ${data.windScale}</div>
-                ${data.extraInfo ? `<div class="text-[12px] font-medium opacity-60 mt-0.5">${data.extraInfo}</div>` : ""}
-                </div>
-            </div>
-            <div class="hidden md:block w-px h-[70px] bg-black/10 dark:bg-white/10 shrink-0"></div>
-            <div class="block md:hidden h-px w-[60%] bg-black/10 dark:bg-white/10 my-4 shrink-0"></div>
-            <div class="flex-1 w-full flex justify-between items-center px-4 overflow-x-auto scroolbar-hide shrink-0 pb-2 md:pb-0 mt-2 md:mt-0">
-                ${data.forecasts
-                  .map(
-                    (f) => `
-                <div class="flex flex-col items-center min-w-[56px] shrink-0">
-                    <span class="text-[14px] font-bold opacity-60 mb-2.5">${f.day}</span>
-                    <span class="text-[32px] drop-shadow-sm mb-3.5 leading-none">${f.emoji}</span>
-                    <span class="text-[15px] font-bold tracking-tight">${f.high}°<span class="opacity-40 ml-1.5">${f.low}°</span></span>
-                </div>
-                `,
-                  )
-                  .join("")}
-            </div>
-            `;
+              <div class="flex items-center justify-center md:justify-start gap-6 md:gap-8 w-full md:w-[45%] lg:w-[40%] px-4 pt-2 md:pt-0 pb-4 md:pb-0">
+                  <div class="text-[72px] leading-none drop-shadow select-none">${data.emoji}</div>
+                  <div class="flex flex-col">
+                  <div class="text-[52px] font-bold tracking-tighter leading-none mb-1.5 ml-[-2px]">${Math.round(data.temp)}°</div>
+                  <div class="text-[19px] font-extrabold tracking-wide drop-shadow-sm">${data.city}</div>
+                  <div class="text-[14px] font-semibold opacity-70 mt-1">${data.desc} · 💧 ${data.humidity}% · 🍃 ${data.windScale}</div>
+                  ${data.extraInfo ? `<div class="text-[12px] font-medium opacity-60 mt-0.5">${data.extraInfo}</div>` : ""}
+                  </div>
+              </div>
+              <div class="hidden md:block w-px h-[70px] bg-black/10 dark:bg-white/10 shrink-0"></div>
+              <div class="block md:hidden h-px w-[60%] bg-black/10 dark:bg-white/10 my-4 shrink-0"></div>
+              <div class="flex-1 w-full flex justify-between items-center px-4 overflow-x-auto scroolbar-hide shrink-0 pb-2 md:pb-0 mt-2 md:mt-0">
+                  ${data.forecasts
+                    .map(
+                      (f) => `
+                  <div class="flex flex-col items-center min-w-[56px] shrink-0">
+                      <span class="text-[14px] font-bold opacity-60 mb-2.5">${f.day}</span>
+                      <span class="text-[32px] drop-shadow-sm mb-3.5 leading-none">${f.emoji}</span>
+                      <span class="text-[15px] font-bold tracking-tight">${f.high}°<span class="opacity-40 ml-1.5">${f.low}°</span></span>
+                  </div>
+                  `,
+                    )
+                    .join("")}
+              </div>
+              `;
         },
       };
       // 快捷方式模块 (支持拖拽排序，右上角管理弹窗版，支持批量编辑和排序）
@@ -1045,22 +938,22 @@
           modalDiv.className =
             "fixed inset-0 z-[70] hidden flex items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-sm transition-all duration-300 px-4";
           modalDiv.innerHTML = `
-      <div class="glass-modal w-full max-w-2xl max-h-[85vh] flex flex-col p-0 overflow-hidden rounded-[32px]">
-        <div class="flex justify-between items-center p-5 border-b border-black/10 dark:border-white/10">
-          <h3 class="text-xl font-bold">管理快捷地址</h3>
-          <button class="close-manage-btn w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 transition">
-            <i class="fa-solid fa-xmark text-xl"></i>
-          </button>
+        <div class="glass-modal w-full max-w-2xl max-h-[85vh] flex flex-col p-0 overflow-hidden rounded-[32px]">
+          <div class="flex justify-between items-center p-5 border-b border-black/10 dark:border-white/10">
+            <h3 class="text-xl font-bold">管理快捷地址</h3>
+            <button class="close-manage-btn w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/10 transition">
+              <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 space-y-2" id="shortcutListContainer"></div>
+          <div class="p-4 border-t border-black/10 dark:border-white/10 flex justify-between items-center">
+            <button id="manageAddBtn" class="px-5 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-bold transition flex items-center gap-2 shadow">
+              <i class="fa-solid fa-plus"></i> 新增书签
+            </button>
+            <button class="close-manage-btn-secondary px-5 py-2.5 rounded-xl bg-gray-200 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-white/20 font-bold transition">关闭</button>
+          </div>
         </div>
-        <div class="flex-1 overflow-y-auto p-4 space-y-2" id="shortcutListContainer"></div>
-        <div class="p-4 border-t border-black/10 dark:border-white/10 flex justify-between items-center">
-          <button id="manageAddBtn" class="px-5 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-bold transition flex items-center gap-2 shadow">
-            <i class="fa-solid fa-plus"></i> 新增书签
-          </button>
-          <button class="close-manage-btn-secondary px-5 py-2.5 rounded-xl bg-gray-200 dark:bg-white/10 hover:bg-gray-300 dark:hover:bg-white/20 font-bold transition">关闭</button>
-        </div>
-      </div>
-    `;
+      `;
           document.body.appendChild(modalDiv);
           this.manageModal = modalDiv;
           this.listContainer = modalDiv.querySelector("#shortcutListContainer");
@@ -1125,32 +1018,32 @@
               iconPreview = `<i class="${item.icon} text-xl text-white bg-black/30 w-8 h-8 rounded-full flex items-center justify-center"></i>`;
             }
             infoDiv.innerHTML = `
-        <div class="w-10 h-10 flex items-center justify-center rounded-xl" style="background: ${item.color}20; color: ${item.color}">
-          ${iconPreview}
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="font-bold truncate">${this.escapeHtml(item.name)}</div>
-          <div class="text-xs opacity-60 truncate">${this.escapeHtml(item.url)}</div>
-        </div>
-      `;
+          <div class="w-10 h-10 flex items-center justify-center rounded-xl" style="background: ${item.color}20; color: ${item.color}">
+            ${iconPreview}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="font-bold truncate">${this.escapeHtml(item.name)}</div>
+            <div class="text-xs opacity-60 truncate">${this.escapeHtml(item.url)}</div>
+          </div>
+        `;
             // 右侧操作按钮：上移、下移、编辑、删除
             const actionsDiv = document.createElement("div");
             actionsDiv.className =
               "flex gap-1 opacity-70 group-hover:opacity-100 transition";
             actionsDiv.innerHTML = `
-        <button class="move-up-btn w-8 h-8 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center ${idx === 0 ? "opacity-30 cursor-not-allowed" : ""}" ${idx === 0 ? "disabled" : ""}>
-          <i class="fa-solid fa-arrow-up text-sm"></i>
-        </button>
-        <button class="move-down-btn w-8 h-8 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center ${idx === this.items.length - 1 ? "opacity-30 cursor-not-allowed" : ""}" ${idx === this.items.length - 1 ? "disabled" : ""}>
-          <i class="fa-solid fa-arrow-down text-sm"></i>
-        </button>
-        <button class="edit-item-btn w-8 h-8 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center">
-          <i class="fa-solid fa-pen text-sm"></i>
-        </button>
-        <button class="delete-item-btn w-8 h-8 rounded-full hover:bg-red-500/20 text-red-500 flex items-center justify-center">
-          <i class="fa-solid fa-trash-can text-sm"></i>
-        </button>
-      `;
+          <button class="move-up-btn w-8 h-8 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center ${idx === 0 ? "opacity-30 cursor-not-allowed" : ""}" ${idx === 0 ? "disabled" : ""}>
+            <i class="fa-solid fa-arrow-up text-sm"></i>
+          </button>
+          <button class="move-down-btn w-8 h-8 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center ${idx === this.items.length - 1 ? "opacity-30 cursor-not-allowed" : ""}" ${idx === this.items.length - 1 ? "disabled" : ""}>
+            <i class="fa-solid fa-arrow-down text-sm"></i>
+          </button>
+          <button class="edit-item-btn w-8 h-8 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center">
+            <i class="fa-solid fa-pen text-sm"></i>
+          </button>
+          <button class="delete-item-btn w-8 h-8 rounded-full hover:bg-red-500/20 text-red-500 flex items-center justify-center">
+            <i class="fa-solid fa-trash-can text-sm"></i>
+          </button>
+        `;
             row.appendChild(infoDiv);
             row.appendChild(actionsDiv);
             this.listContainer.appendChild(row);
@@ -1355,13 +1248,13 @@
             }
 
             card.innerHTML = `
-        <div class="absolute -top-2.5 -right-2.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 z-20 scale-75 group-hover:scale-100">
-          <button class="w-[28px] h-[28px] bg-white/95 text-gray-800 rounded-full flex items-center justify-center text-xs shadow-md border border-gray-200" onclick="ShortcutModule.openModal(${sc.id}); event.stopPropagation();"><i class="fa-solid fa-pen text-[10px]"></i></button>
-          <button class="w-[28px] h-[28px] bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-md border border-red-400" onclick="ShortcutModule.deleteItem(${sc.id}); event.stopPropagation();"><i class="fa-solid fa-xmark text-[12px]"></i></button>
-        </div>
-        <div class="w-[70px] h-[70px] sm:w-[76px] sm:h-[76px] rounded-[24px] flex items-center justify-center transition-all duration-300 group-hover:-translate-y-2 group-hover:shadow-2xl z-10" style="${bgStyle}">${iconHtml}</div>
-        <span class="w-[96px] text-center text-[13px] font-bold tracking-wide truncate mt-3 z-0 transition-colors opacity-85 group-hover:opacity-100">${sc.name}</span>
-      `;
+          <div class="absolute -top-2.5 -right-2.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 z-20 scale-75 group-hover:scale-100">
+            <button class="w-[28px] h-[28px] bg-white/95 text-gray-800 rounded-full flex items-center justify-center text-xs shadow-md border border-gray-200" onclick="ShortcutModule.openModal(${sc.id}); event.stopPropagation();"><i class="fa-solid fa-pen text-[10px]"></i></button>
+            <button class="w-[28px] h-[28px] bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-md border border-red-400" onclick="ShortcutModule.deleteItem(${sc.id}); event.stopPropagation();"><i class="fa-solid fa-xmark text-[12px]"></i></button>
+          </div>
+          <div class="w-[70px] h-[70px] sm:w-[76px] sm:h-[76px] rounded-[24px] flex items-center justify-center transition-all duration-300 group-hover:-translate-y-2 group-hover:shadow-2xl z-10" style="${bgStyle}">${iconHtml}</div>
+          <span class="w-[96px] text-center text-[13px] font-bold tracking-wide truncate mt-3 z-0 transition-colors opacity-85 group-hover:opacity-100">${sc.name}</span>
+        `;
             this.grid.appendChild(card);
           });
         },
