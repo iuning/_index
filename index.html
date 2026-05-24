@@ -475,10 +475,30 @@
           if (this.isDark) {
             document.documentElement.classList.add("dark");
             this.icon.className = "fa-solid fa-sun text-[20px] text-yellow-400";
+
+            // 检查是否是精选氛围色带背景
+            const bgMode = Store.get("ntpBgMode", "bing");
+            if (bgMode && (bgMode.startsWith("grad-") || bgMode.startsWith("solid-"))) {
+              const preset = BgModule.presets.find(p => p.id === bgMode);
+              if (preset) {
+                document.body.style.backgroundImage = "none";
+                document.body.style.background = "#000000";
+              }
+            }
           } else {
             document.documentElement.classList.remove("dark");
             this.icon.className =
               "fa-solid fa-moon text-[20px] text-indigo-500";
+
+            // 恢复原色
+            const bgMode = Store.get("ntpBgMode", "bing");
+            if (bgMode && (bgMode.startsWith("grad-") || bgMode.startsWith("solid-"))) {
+              const preset = BgModule.presets.find(p => p.id === bgMode);
+              if (preset) {
+                document.body.style.backgroundImage = "none";
+                document.body.style.background = preset.bg;
+              }
+            }
           }
         },
       };
@@ -1376,8 +1396,20 @@
           } else {
             const preset =
               this.presets.find((p) => p.id === this.mode) || this.presets[0];
+
+            // 检查当前主题状态
+            const isDarkMode = document.documentElement.classList.contains("dark");
+
             document.body.style.backgroundImage = "none";
-            document.body.style.background = preset.bg;
+
+            if (isDarkMode && (this.mode.startsWith("grad-") || this.mode.startsWith("solid-"))) {
+              // 夜间模式使用黑色背景
+              document.body.style.background = "#000000";
+            } else {
+              // 日间模式使用原色
+              document.body.style.background = preset.bg;
+            }
+
             if (preset.isPic) document.body.classList.add("has-pic");
           }
         },
